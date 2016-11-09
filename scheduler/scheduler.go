@@ -124,6 +124,12 @@ func (s *Scheduler) TriggerImmediately(
 ) (db.Build, Waiter, error) {
 	logger = logger.Session("trigger-immediately", lager.Data{"job_name": jobConfig.Name})
 
+	build, err := s.DB.CreateJobBuild(jobConfig.Name)
+	if err != nil {
+		logger.Error("failed-to-create-job-build", err)
+		return nil, nil, err
+	}
+
 	lock, acquired, err := s.DB.AcquireResourceCheckingForJobLock(
 		logger,
 		jobConfig.Name,
@@ -133,14 +139,23 @@ func (s *Scheduler) TriggerImmediately(
 		return nil, nil, err
 	}
 
-	build, err := s.DB.CreateJobBuild(jobConfig.Name)
-	if err != nil {
-		logger.Error("failed-to-create-job-build", err)
-		if acquired {
-			lock.Release()
-		}
-		return nil, nil, err
-	}
+	// lock, acquired, err := s.DB.AcquireResourceCheckingForJobLock(
+	// 	logger,
+	// 	jobConfig.Name,
+	// )
+	// if err != nil {
+	// 	logger.Error("failed-to-lock-resource-checking-job", err)
+	// 	return nil, nil, err
+	// }
+	//
+	// build, err := s.DB.CreateJobBuild(jobConfig.Name)
+	// if err != nil {
+	// 	logger.Error("failed-to-create-job-build", err)
+	// 	if acquired {
+	// 		lock.Release()
+	// 	}
+	// 	return nil, nil, err
+	// }
 
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
