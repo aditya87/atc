@@ -125,4 +125,3 @@ func populateTeamBuildEventsTable(tx migration.LimitedTx, teamID int) error {
 
 	return err
 }
-
