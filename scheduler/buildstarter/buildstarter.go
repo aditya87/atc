@@ -96,6 +96,10 @@ func (s *buildStarter) tryStartNextPendingBuild(
 		"build-name": nextPendingBuild.Name(),
 	})
 
+	if nextPendingBuild.IsManuallyTriggered() {
+		// run check
+	}
+
 	reachedMaxInFlight, err := s.maxInFlightUpdater.UpdateMaxInFlightReached(logger, jobConfig, nextPendingBuild.ID())
 	if err != nil {
 		return false, err
