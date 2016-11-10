@@ -30,7 +30,6 @@ type SchedulerDB interface {
 	Config() atc.Config
 	CreateJobBuild(job string) (db.Build, error)
 	EnsurePendingBuildExists(jobName string) error
-	AcquireResourceCheckingForJobLock(logger lager.Logger, job string) (db.Lock, bool, error)
 	GetAllPendingBuilds() (map[string][]db.Build, error)
 	GetPendingBuildsForJob(jobName string) ([]db.Build, error)
 }

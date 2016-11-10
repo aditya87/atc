@@ -5,6 +5,7 @@ import (
 	"github.com/concourse/atc"
 	"github.com/concourse/atc/db"
 	"github.com/concourse/atc/engine"
+	"github.com/concourse/atc/resource"
 	"github.com/concourse/atc/scheduler/buildstarter/maxinflight"
 )
 
@@ -47,12 +48,14 @@ func NewBuildStarter(
 	maxInFlightUpdater maxinflight.Updater,
 	factory BuildFactory,
 	execEngine engine.Engine,
+	resourceCheck	resource.Resource
 ) BuildStarter {
 	return &buildStarter{
 		db:                 db,
 		maxInFlightUpdater: maxInFlightUpdater,
 		factory:            factory,
 		execEngine:         execEngine,
+		resourceCheck:			resource,
 	}
 }
 
@@ -61,6 +64,7 @@ type buildStarter struct {
 	maxInFlightUpdater maxinflight.Updater
 	factory            BuildFactory
 	execEngine         engine.Engine
+	resourceCheck			 resource.Resource
 }
 
 func (s *buildStarter) TryStartPendingBuildsForJob(
@@ -98,6 +102,7 @@ func (s *buildStarter) tryStartNextPendingBuild(
 
 	if nextPendingBuild.IsManuallyTriggered() {
 		// run check
+		s.resourceCheck.Check
 	}
 
 	reachedMaxInFlight, err := s.maxInFlightUpdater.UpdateMaxInFlightReached(logger, jobConfig, nextPendingBuild.ID())

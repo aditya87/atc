@@ -71,7 +71,6 @@ type PipelineDB interface {
 	GetPendingBuildsForJob(jobName string) ([]Build, error)
 	GetAllPendingBuilds() (map[string][]Build, error)
 	UseInputsForBuild(buildID int, inputs []BuildInput) error
-	// AcquireResourceCheckingForJobLock(logger lager.Logger, jobName string) (Lock, bool, error)
 
 	LoadVersionsDB() (*algorithm.VersionsDB, error)
 	GetVersionedResourceByVersion(atcVersion atc.Version, resourceName string) (SavedVersionedResource, bool, error)
@@ -448,69 +447,6 @@ func (pdb *pipelineDB) AcquireSchedulingLock(logger lager.Logger, interval time.
 
 	return lock, true, nil
 }
-
-// func (pdb *pipelineDB) AcquireResourceCheckingForJobLock(logger lager.Logger, build string) (Lock, bool, error) {
-// 	tx, err := pdb.conn.Begin()
-// 	if err != nil {
-// 		return nil, false, err
-// 	}
-//
-// 	defer tx.Rollback()
-//
-// 	var resourceCheckWaiverEnd int
-// 	err = tx.QueryRow(`
-// 		SELECT COALESCE(MAX(b.id), 0)
-// 			FROM builds b
-// 			JOIN jobs j ON b.job_id = j.id
-// 			WHERE j.name = $1
-// 				AND j.pipeline_id = $2
-// 	`, build.JobName(), pdb.ID).Scan(&resourceCheckWaiverEnd)
-// 	if err != nil {
-// 		return nil, false, err
-// 	}
-//
-// 	// if resourceCheckWaiverEnd < build.id && resourceCheckWaiverEndBuild.Pending { return nil, false, nil }
-//
-// 	savedJob, err := pdb.getJob(tx, build.JobName())
-// 	if err != nil {
-// 		return nil, false, err
-// 	}
-//
-// 	lock := pdb.lockFactory.NewLock(
-// 		logger.Session("lock", lager.Data{
-// 			"job_name": build.JobName(),
-// 		}),
-// 		resourceCheckingForJobLockID(savedJob.ID),
-// 	)
-//
-// 	acquired, err := lock.Acquire()
-// 	if err != nil {
-// 		return nil, false, err
-// 	}
-//
-// 	if !acquired {
-// 		return nil, false, nil
-// 	}
-//
-// 	_, err = tx.Exec(`
-// 		UPDATE jobs
-// 		SET resource_check_waiver_end = $3
-// 		WHERE name = $1
-// 			AND pipeline_id = $2
-// 	`, build.JobName(), pdb.ID, resourceCheckWaiverEnd)
-// 	if err != nil {
-// 		lock.Release()
-// 		return nil, false, err
-// 	}
-//
-// 	err = tx.Commit()
-// 	if err != nil {
-// 		lock.Release()
-// 		return nil, false, err
-// 	}
-//
-// 	return lock, true, nil
-// }
 
 func (pdb *pipelineDB) GetResourceVersions(resourceName string, page Page) ([]SavedVersionedResource, Pagination, bool, error) {
 	dbResource, found, err := pdb.GetResource(resourceName)
