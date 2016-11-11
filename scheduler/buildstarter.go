@@ -1,4 +1,4 @@
-package buildstarter
+package scheduler
 
 import (
 	"code.cloudfoundry.org/lager"
@@ -6,8 +6,8 @@ import (
 	"github.com/concourse/atc/config"
 	"github.com/concourse/atc/db"
 	"github.com/concourse/atc/engine"
-	"github.com/concourse/atc/scheduler"
-	"github.com/concourse/atc/scheduler/buildstarter/maxinflight"
+	"github.com/concourse/atc/scheduler/inputmapper"
+	"github.com/concourse/atc/scheduler/maxinflight"
 )
 
 //go:generate counterfeiter . BuildStarter
@@ -19,6 +19,7 @@ type BuildStarter interface {
 		resourceConfigs atc.ResourceConfigs,
 		resourceTypes atc.ResourceTypes,
 		nextPendingBuilds []db.Build,
+		scanner Scanner,
 	) error
 }
 
@@ -63,6 +64,8 @@ type buildStarter struct {
 	maxInFlightUpdater maxinflight.Updater
 	factory            BuildFactory
 	execEngine         engine.Engine
+	schedulerDB        SchedulerDB
+	inputMapper        inputmapper.InputMapper
 }
 
 func (s *buildStarter) TryStartPendingBuildsForJob(
@@ -71,7 +74,7 @@ func (s *buildStarter) TryStartPendingBuildsForJob(
 	resourceConfigs atc.ResourceConfigs,
 	resourceTypes atc.ResourceTypes,
 	nextPendingBuildsForJob []db.Build,
-	scanner scheduler.Scanner,
+	scanner Scanner,
 ) error {
 	for _, nextPendingBuild := range nextPendingBuildsForJob {
 		started, err := s.tryStartNextPendingBuild(logger, nextPendingBuild, jobConfig, resourceConfigs, resourceTypes, scanner)
@@ -112,6 +115,17 @@ func (s *buildStarter) tryStartNextPendingBuild(
 			if err != nil {
 				return false, err
 			}
+		}
+
+		versions, err := s.schedulerDB.LoadVersionsDB()
+		if err != nil {
+			logger.Error("failed-to-load-versions-db", err)
+			return false, err
+		}
+
+		_, err = s.inputMapper.SaveNextInputMapping(logger, versions, jobConfig)
+		if err != nil {
+			return false, err
 		}
 	}
 

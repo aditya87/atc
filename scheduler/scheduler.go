@@ -9,14 +9,13 @@ import (
 	"github.com/concourse/atc/config"
 	"github.com/concourse/atc/db"
 	"github.com/concourse/atc/db/algorithm"
-	"github.com/concourse/atc/scheduler/buildstarter"
 	"github.com/concourse/atc/scheduler/inputmapper"
 )
 
 type Scheduler struct {
 	DB           SchedulerDB
 	InputMapper  inputmapper.InputMapper
-	BuildStarter buildstarter.BuildStarter
+	BuildStarter BuildStarter
 	Scanner      Scanner
 }
 
@@ -72,7 +71,7 @@ func (s *Scheduler) Schedule(
 			continue
 		}
 
-		err := s.BuildStarter.TryStartPendingBuildsForJob(logger, jobConfig, resourceConfigs, resourceTypes, nextPendingBuildsForJob)
+		err := s.BuildStarter.TryStartPendingBuildsForJob(logger, jobConfig, resourceConfigs, resourceTypes, nextPendingBuildsForJob, s.Scanner)
 		jobSchedulingTime[jobConfig.Name] = jobSchedulingTime[jobConfig.Name] + time.Since(jStart)
 
 		if err != nil {
@@ -128,7 +127,6 @@ func (s *Scheduler) TriggerImmediately(
 		logger.Error("failed-to-create-job-build", err)
 		return nil, nil, err
 	}
-
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 

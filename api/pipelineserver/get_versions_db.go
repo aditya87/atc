@@ -9,7 +9,7 @@ import (
 
 func (s *Server) GetVersionsDB(pipelineDB db.PipelineDB) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		versionsDB, _ := pipelineDB.LoadVersionsDB()
+		versionsDB, _ := pipelineDB.LoadVersionsDB(nil)
 		w.Header().Set("Content-Type", "application/json")
 
 		json.NewEncoder(w).Encode(versionsDB)

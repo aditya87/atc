@@ -1,6 +1,10 @@
 package config
 
-import "github.com/concourse/atc"
+import (
+	"fmt"
+
+	"github.com/concourse/atc"
+)
 
 // these are expressly tucked away so as to avoid accidental use in public API
 // endpoints as that could leak credentials
@@ -21,6 +25,7 @@ type JobOutput struct {
 }
 
 func JobInputs(config atc.JobConfig) []JobInput {
+	fmt.Println("in job input")
 	return collectInputs(atc.PlanConfig{
 		Do:      &config.Plan,
 		Ensure:  config.Ensure,
