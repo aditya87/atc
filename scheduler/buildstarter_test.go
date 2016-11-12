@@ -2,15 +2,19 @@ package scheduler_test
 
 import (
 	"errors"
+	"time"
 
 	"code.cloudfoundry.org/lager"
 	"code.cloudfoundry.org/lager/lagertest"
 	"github.com/concourse/atc"
 	"github.com/concourse/atc/db"
+	"github.com/concourse/atc/db/algorithm"
 	"github.com/concourse/atc/db/dbfakes"
 	"github.com/concourse/atc/engine"
 	"github.com/concourse/atc/engine/enginefakes"
 	"github.com/concourse/atc/scheduler"
+	"github.com/concourse/atc/scheduler/inputmapper"
+	"github.com/concourse/atc/scheduler/inputmapper/inputmapperfakes"
 	"github.com/concourse/atc/scheduler/maxinflight/maxinflightfakes"
 	"github.com/concourse/atc/scheduler/schedulerfakes"
 
@@ -20,12 +24,15 @@ import (
 
 var _ = Describe("I'm a BuildStarter", func() {
 	var (
-		fakeDB        *schedulerfakes.FakeBuildStarterDB
-		fakeUpdater   *maxinflightfakes.FakeUpdater
-		fakeFactory   *schedulerfakes.FakeBuildFactory
-		fakeEngine    *enginefakes.FakeEngine
-		pendingBuilds []db.Build
-		fakeScanner   *schedulerfakes.FakeScanner
+		fakeDB           *schedulerfakes.FakeBuildStarterDB
+		fakeSchedulerDB  *schedulerfakes.FakeSchedulerDB
+		fakeUpdater      *maxinflightfakes.FakeUpdater
+		fakeFactory      *schedulerfakes.FakeBuildFactory
+		fakeEngine       *enginefakes.FakeEngine
+		pendingBuilds    []db.Build
+		fakeScanner      *schedulerfakes.FakeScanner
+		fakeInputMapper  *inputmapperfakes.FakeInputMapper
+		fakeBuildStarter *schedulerfakes.FakeBuildStarter
 
 		buildStarter scheduler.BuildStarter
 
@@ -34,23 +41,73 @@ var _ = Describe("I'm a BuildStarter", func() {
 
 	BeforeEach(func() {
 		fakeDB = new(schedulerfakes.FakeBuildStarterDB)
+		fakeSchedulerDB = new(schedulerfakes.FakeSchedulerDB)
 		fakeUpdater = new(maxinflightfakes.FakeUpdater)
 		fakeFactory = new(schedulerfakes.FakeBuildFactory)
 		fakeEngine = new(enginefakes.FakeEngine)
-		pendingBuilds = []db.Build{new(dbfakes.FakeBuild)}
 		fakeScanner = new(schedulerfakes.FakeScanner)
+		fakeInputMapper = new(inputmapperfakes.FakeInputMapper)
+		fakeBuildStarter = new(schedulerfakes.FakeBuildStarter)
 
 		buildStarter = scheduler.NewBuildStarter(fakeDB, fakeUpdater, fakeFactory, fakeEngine)
 
 		disaster = errors.New("bad thing")
+
 	})
 
 	Describe("TryStartPendingBuildsForJob", func() {
 		var tryStartErr error
 		var createdBuild *dbfakes.FakeBuild
+		var jobConfig atc.JobConfig
 
 		JustBeforeEach(func() {
 			jobConfig = atc.JobConfig{Name: "some-job", Plan: atc.PlanSequence{{Get: "input-1"}, {Get: "input-2"}}}
+
+			createdBuild = new(dbfakes.FakeBuild)
+			createdBuild.IsManuallyTriggeredReturns(true)
+			fakeSchedulerDB.CreateJobBuildReturns(createdBuild, nil)
+
+			fakeSchedulerDB.LoadVersionsDBReturns(&algorithm.VersionsDB{
+				ResourceVersions: []algorithm.ResourceVersion{
+					{
+						VersionID:  73,
+						ResourceID: 127,
+						CheckOrder: 123,
+					},
+				},
+				BuildOutputs: []algorithm.BuildOutput{
+					{
+						ResourceVersion: algorithm.ResourceVersion{
+							VersionID:  73,
+							ResourceID: 127,
+							CheckOrder: 123,
+						},
+						BuildID: 66,
+						JobID:   13,
+					},
+				},
+				BuildInputs: []algorithm.BuildInput{
+					{
+						ResourceVersion: algorithm.ResourceVersion{
+							VersionID:  66,
+							ResourceID: 77,
+							CheckOrder: 88,
+						},
+						BuildID:   66,
+						JobID:     13,
+						InputName: "some-input-name",
+					},
+				},
+				JobIDs: map[string]int{
+					"bad-luck-job": 13,
+				},
+				ResourceIDs: map[string]int{
+					"resource-127": 127,
+				},
+				CachedAt: time.Unix(42, 0).UTC(),
+			}, nil)
+
+			pendingBuilds = []db.Build{createdBuild}
 
 			tryStartErr = buildStarter.TryStartPendingBuildsForJob(
 				lagertest.NewTestLogger("test"),
@@ -59,21 +116,19 @@ var _ = Describe("I'm a BuildStarter", func() {
 				atc.ResourceTypes{{Name: "some-resource-type"}},
 				pendingBuilds,
 				fakeScanner,
-
-			createdBuild = new(dbfakes.FakeBuild)
-			createdBuild.IsManuallyTriggeredReturns(true)
-			fakeDB.CreateJobBuildReturns(createdBuild, nil)
+				fakeSchedulerDB,
+				fakeInputMapper,
 			)
+
 		})
 
-		Context("when resource checking fails", func() {
+		FContext("when resource checking fails", func() {
 			BeforeEach(func() {
 				fakeScanner.ScanReturns(disaster)
 			})
 
-			It("returns the build", func() {
-				Expect(triggerErr).NotTo(HaveOccurred())
-				Expect(triggeredBuild).To(Equal(createdBuild))
+			It("returns an error", func() {
+				Expect(tryStartErr).To(Equal(disaster))
 			})
 		})
 
@@ -81,19 +136,18 @@ var _ = Describe("I'm a BuildStarter", func() {
 			BeforeEach(func() {
 				fakeScanner.ScanStub = func(lager.Logger, string) error {
 					defer GinkgoRecover()
-					Expect(fakeDB.LoadVersionsDBCallCount()).To(BeZero())
+					Expect(fakeSchedulerDB.LoadVersionsDBCallCount()).To(BeZero())
 					return nil
 				}
 			})
 
 			Context("when loading the versions DB fails", func() {
 				BeforeEach(func() {
-					fakeDB.LoadVersionsDBReturns(nil, disaster)
+					fakeSchedulerDB.LoadVersionsDBReturns(nil, disaster)
 				})
 
-				It("returns the build", func() {
-					Expect(triggerErr).NotTo(HaveOccurred())
-					Expect(triggeredBuild).To(Equal(createdBuild))
+				It("returns an error", func() {
+					Expect(tryStartErr).To(Equal(disaster))
 				})
 
 				It("checked for the right resources", func() {
@@ -104,7 +158,7 @@ var _ = Describe("I'm a BuildStarter", func() {
 				})
 
 				It("loaded the versions DB after checking all the resources", func() {
-					Expect(fakeDB.LoadVersionsDBCallCount()).To(Equal(1))
+					Expect(fakeSchedulerDB.LoadVersionsDBCallCount()).To(Equal(1))
 				})
 			})
 
@@ -113,7 +167,7 @@ var _ = Describe("I'm a BuildStarter", func() {
 
 				BeforeEach(func() {
 					versionsDB = &algorithm.VersionsDB{JobIDs: map[string]int{"j1": 1}}
-					fakeDB.LoadVersionsDBReturns(versionsDB, nil)
+					fakeSchedulerDB.LoadVersionsDBReturns(versionsDB, nil)
 				})
 
 				Context("when saving the next input mapping fails", func() {
@@ -139,20 +193,19 @@ var _ = Describe("I'm a BuildStarter", func() {
 
 					Context("when starting all pending builds fails", func() {
 						BeforeEach(func() {
-							fakeBuildStarter.TryStartPendingBuildsForJobStub = func(lager.Logger, atc.JobConfig, atc.ResourceConfigs, atc.ResourceTypes, []db.Build, Scanner) error {
+							fakeBuildStarter.TryStartPendingBuildsForJobStub = func(lager.Logger, atc.JobConfig, atc.ResourceConfigs, atc.ResourceTypes, []db.Build, scheduler.Scanner, scheduler.SchedulerDB, inputmapper.InputMapper) error {
 								defer GinkgoRecover()
 								return disaster
 							}
 						})
 
 						It("saved the next input mapping and returns the build", func() {
-							Expect(triggerErr).NotTo(HaveOccurred())
-							Expect(triggeredBuild).To(Equal(createdBuild))
+							Expect(tryStartErr).NotTo(HaveOccurred())
 						})
 
 						It("started all pending builds for the right job", func() {
 							Expect(fakeBuildStarter.TryStartPendingBuildsForJobCallCount()).To(Equal(1))
-							_, actualJob, actualResources, actualResourceTypes, actualPendingBuilds, _ := fakeBuildStarter.TryStartPendingBuildsForJobArgsForCall(0)
+							_, actualJob, actualResources, actualResourceTypes, actualPendingBuilds, _, _, _ := fakeBuildStarter.TryStartPendingBuildsForJobArgsForCall(0)
 							Expect(actualJob).To(Equal(jobConfig))
 							Expect(actualResources).To(Equal(atc.ResourceConfigs{{Name: "some-resource"}}))
 							Expect(actualResourceTypes).To(Equal(atc.ResourceTypes{{Name: "some-resource-type"}}))
@@ -165,9 +218,8 @@ var _ = Describe("I'm a BuildStarter", func() {
 							fakeBuildStarter.TryStartPendingBuildsForJobReturns(nil)
 						})
 
-						It("returns the build", func() {
-							Expect(triggerErr).NotTo(HaveOccurred())
-							Expect(triggeredBuild).To(Equal(createdBuild))
+						It("does not return an error", func() {
+							Expect(tryStartErr).NotTo(HaveOccurred())
 						})
 					})
 				})

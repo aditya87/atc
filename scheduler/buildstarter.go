@@ -1,6 +1,8 @@
 package scheduler
 
 import (
+	"fmt"
+
 	"code.cloudfoundry.org/lager"
 	"github.com/concourse/atc"
 	"github.com/concourse/atc/config"
@@ -20,6 +22,9 @@ type BuildStarter interface {
 		resourceTypes atc.ResourceTypes,
 		nextPendingBuilds []db.Build,
 		scanner Scanner,
+		sdb SchedulerDB,
+		inputMapper inputmapper.InputMapper,
+
 	) error
 }
 
@@ -75,9 +80,11 @@ func (s *buildStarter) TryStartPendingBuildsForJob(
 	resourceTypes atc.ResourceTypes,
 	nextPendingBuildsForJob []db.Build,
 	scanner Scanner,
+	sdb SchedulerDB,
+	inputMapper inputmapper.InputMapper,
 ) error {
 	for _, nextPendingBuild := range nextPendingBuildsForJob {
-		started, err := s.tryStartNextPendingBuild(logger, nextPendingBuild, jobConfig, resourceConfigs, resourceTypes, scanner)
+		started, err := s.tryStartNextPendingBuild(logger, nextPendingBuild, jobConfig, resourceConfigs, resourceTypes, scanner, sdb, inputMapper)
 		if err != nil {
 			return err
 		}
@@ -97,6 +104,8 @@ func (s *buildStarter) tryStartNextPendingBuild(
 	resourceConfigs atc.ResourceConfigs,
 	resourceTypes atc.ResourceTypes,
 	scanner Scanner,
+	sdb SchedulerDB,
+	inputMapper inputmapper.InputMapper,
 ) (bool, error) {
 	logger = logger.Session("try-start-next-pending-build", lager.Data{
 		"build-id":   nextPendingBuild.ID(),
@@ -104,8 +113,10 @@ func (s *buildStarter) tryStartNextPendingBuild(
 	})
 
 	if nextPendingBuild.IsManuallyTriggered() {
+		fmt.Println("TRUE")
 		jobBuildInputs := config.JobInputs(jobConfig)
 		for _, input := range jobBuildInputs {
+			fmt.Println("-----------INSIDE OF LOOP------------------")
 			scanLog := logger.Session("scan", lager.Data{
 				"input":    input.Name,
 				"resource": input.Resource,
@@ -117,13 +128,15 @@ func (s *buildStarter) tryStartNextPendingBuild(
 			}
 		}
 
-		versions, err := s.schedulerDB.LoadVersionsDB()
+		fmt.Println("are we getting here??")
+
+		versions, err := sdb.LoadVersionsDB()
 		if err != nil {
 			logger.Error("failed-to-load-versions-db", err)
 			return false, err
 		}
 
-		_, err = s.inputMapper.SaveNextInputMapping(logger, versions, jobConfig)
+		_, err = inputMapper.SaveNextInputMapping(logger, versions, jobConfig)
 		if err != nil {
 			return false, err
 		}
